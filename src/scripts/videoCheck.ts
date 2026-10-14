@@ -3,43 +3,63 @@ import SettingsStorage from './settingsStorage'
 import { PlayingMediaChangeEvent, SettingsData } from './types'
 
 interface VideoElementWithEvents {
-    elem: Element,
+    elem: HTMLVideoElement,
     play: EventListenerOrEventListenerObject,
     pause: EventListenerOrEventListenerObject,
     emptied: EventListenerOrEventListenerObject,
-    unload: EventListenerOrEventListenerObject
+    unload: EventListenerOrEventListenerObject,
+    volumechange: EventListenerOrEventListenerObject
 }
 
 let videoElements: Array<VideoElementWithEvents> = [];
 
 function createEvents(): void {
-    const videoElems = document.querySelectorAll('video:not(.bws-found)');
+    const videoElems = document.querySelectorAll<HTMLVideoElement>('video:not(.bws-found)');
     for (const elem of videoElems) {
         elem.classList.add('bws-found');
-        const changeEvent = {
-            type: 'playingMedia',
-            playingMedia: {
-                videoSource: elem.getAttribute('src'),
-                url: location.hostname,
-                state: null
+
+        const getVideoSource = () => elem.currentSrc || elem.src || elem.getAttribute('src') || '';
+
+        const sendMediaState = (state: 'playing' | 'paused') => {
+            const changeEvent = {
+                type: 'playingMedia',
+                playingMedia: {
+                    videoSource: getVideoSource(),
+                    url: location.hostname,
+                    state: state
+                }
+            };
+            browser.runtime.sendMessage(changeEvent).catch(() => {});
+        };
+
+        const isAudible = () => !elem.muted && elem.volume > 0;
+
+        const onPlay = () => {
+            if (isAudible()) {
+                sendMediaState('playing');
+            } else {
+                sendMediaState('paused');
             }
         };
 
-        const onPlay = () => {
-            changeEvent.playingMedia.state = 'playing';
-            browser.runtime.sendMessage(changeEvent);
-        };
         const onPause = () => {
-            changeEvent.playingMedia.state = 'paused';
-            browser.runtime.sendMessage(changeEvent);
+            sendMediaState('paused');
         };
+
         const onEmptied = () => {
-            changeEvent.playingMedia.state = 'paused';
-            browser.runtime.sendMessage(changeEvent);
+            sendMediaState('paused');
         };
+
         const onUnload = () => {
-            changeEvent.playingMedia.state = 'paused';
-            browser.runtime.sendMessage(changeEvent);
+            sendMediaState('paused');
+        };
+
+        const onVolumeChange = () => {
+            if (!elem.paused && isAudible()) {
+                sendMediaState('playing');
+            } else {
+                sendMediaState('paused');
+            }
         };
 
         let videoElementWithListeners: VideoElementWithEvents = {
@@ -47,12 +67,14 @@ function createEvents(): void {
             play: onPlay,
             pause: onPause,
             emptied: onEmptied,
-            unload: onUnload
+            unload: onUnload,
+            volumechange: onVolumeChange
         };
 
         elem.addEventListener('play', videoElementWithListeners.play);
         elem.addEventListener('pause', videoElementWithListeners.pause);
         elem.addEventListener('emptied', videoElementWithListeners.emptied);
+        elem.addEventListener('volumechange', videoElementWithListeners.volumechange);
         window.addEventListener('unload', videoElementWithListeners.unload);
 
         videoElements.push(videoElementWithListeners);
@@ -70,6 +92,7 @@ function removeEvents(): void {
         item.elem.removeEventListener('play', item.play);
         item.elem.removeEventListener('pause', item.pause);
         item.elem.removeEventListener('emptied', item.emptied);
+        item.elem.removeEventListener('volumechange', item.volumechange);
         window.removeEventListener('unload', item.unload);
     }
     videoElements = [];
@@ -95,6 +118,6 @@ SettingsStorage.onChangeOrLoad((settings: SettingsData) => {
                 state: 'stopAll'
             }
         }
-        browser.runtime.sendMessage(changeEvent);
+        browser.runtime.sendMessage(changeEvent).catch(() => {});
     }
 });

@@ -15,18 +15,30 @@ let settings: SettingsData;
 let currentTime: Date;
 
 async function iterateCounter(counter: Counter): Promise<Counter> {
-    // If it's a new day return a new counter
-    if (new Date().getDate() != currentTime.getDate()) {
-        currentTime = new Date;
+    const today = new Date();
+    // If it's a new day, save the current counter for the outgoing day and load the new day's counter
+    if (Utils.formatDate(today) !== Utils.formatDate(currentTime)) {
+        await CounterStorage.set(counter, currentTime);
+        currentTime = today;
         return await CounterStorage.get();
     }
 
-    let tab = (await browser.tabs.query({ currentWindow: true, active: true }))[0];
+    let tab = (await browser.tabs.query({ lastFocusedWindow: true, active: true }))[0];
     if (!tab || !tab.url) {
         return counter;
     }
 
-    const url = new URL(tab.url);
+    let url: URL;
+    try {
+        url = new URL(tab.url);
+    } catch {
+        return counter;
+    }
+
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+        return counter;
+    }
+
     const hostname = url.hostname;
     if (!hostname || hostname === extensionUUID) {
         return counter;
@@ -100,11 +112,9 @@ async function main(): Promise<void> {
         }
     }, 1000)
 
-    // Save loop
+    // Save loop - persist counter every interval regardless of active/idle state
     setInterval(async () => {
-        if (awake.available()) {
-            await CounterStorage.set(counter);
-        }
+        await CounterStorage.set(counter);
     }, saveIntervalTime)
 }
 
