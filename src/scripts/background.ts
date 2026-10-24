@@ -14,7 +14,7 @@ const extensionUUID = Utils.getExtensionUUID();
 let settings: SettingsData;
 let currentTime: Date;
 
-async function iterateCounter(counter: Counter): Promise<Counter> {
+async function iterateCounter(counter: Counter, tab: browser.Tabs.Tab | undefined): Promise<Counter> {
     const today = new Date();
     // If it's a new day, save the current counter for the outgoing day and load the new day's counter
     if (Utils.formatDate(today) !== Utils.formatDate(currentTime)) {
@@ -23,7 +23,6 @@ async function iterateCounter(counter: Counter): Promise<Counter> {
         return await CounterStorage.get();
     }
 
-    let tab = (await browser.tabs.query({ lastFocusedWindow: true, active: true }))[0];
     if (!tab || !tab.url) {
         return counter;
     }
@@ -83,8 +82,9 @@ async function main(): Promise<void> {
     // Main loop
     const awake = new Awake;
     setInterval(async () => {
-        if (awake.available()) {
-            counter = await iterateCounter(counter);
+        const tab = (await browser.tabs.query({ lastFocusedWindow: true, active: true }))[0];
+        if (awake.available(tab)) {
+            counter = await iterateCounter(counter, tab);
             browser.action.setIcon({
                 path: {
                     16: "assets/icons/16px.png",

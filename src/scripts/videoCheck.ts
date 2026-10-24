@@ -13,6 +13,14 @@ interface VideoElementWithEvents {
 
 let videoElements: Array<VideoElementWithEvents> = [];
 
+// Interval at which currently playing videos are re-announced so the background
+// state survives service worker restarts and missed events
+const heartbeatIntervalTime = 5000;
+let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+
+const isAudible = (elem: HTMLVideoElement) => !elem.muted && elem.volume > 0;
+const isPlayingAudibly = (elem: HTMLVideoElement) => !elem.paused && !elem.ended && isAudible(elem);
+
 function createEvents(): void {
     const videoElems = document.querySelectorAll<HTMLVideoElement>('video:not(.bws-found)');
     for (const elem of videoElems) {
@@ -32,10 +40,8 @@ function createEvents(): void {
             browser.runtime.sendMessage(changeEvent).catch(() => {});
         };
 
-        const isAudible = () => !elem.muted && elem.volume > 0;
-
         const onPlay = () => {
-            if (isAudible()) {
+            if (isAudible(elem)) {
                 sendMediaState('playing');
             } else {
                 sendMediaState('paused');
@@ -55,7 +61,7 @@ function createEvents(): void {
         };
 
         const onVolumeChange = () => {
-            if (!elem.paused && isAudible()) {
+            if (isPlayingAudibly(elem)) {
                 sendMediaState('playing');
             } else {
                 sendMediaState('paused');
@@ -78,6 +84,40 @@ function createEvents(): void {
         window.addEventListener('unload', videoElementWithListeners.unload);
 
         videoElements.push(videoElementWithListeners);
+
+        // The video may already be playing before listeners were attached
+        if (isPlayingAudibly(elem)) {
+            sendMediaState('playing');
+        }
+    }
+}
+
+function startHeartbeat(): void {
+    if (heartbeatInterval !== null) {
+        return;
+    }
+    heartbeatInterval = setInterval(() => {
+        // Pick up videos that were added without triggering the observer
+        createEvents();
+        for (const item of videoElements) {
+            if (isPlayingAudibly(item.elem)) {
+                browser.runtime.sendMessage({
+                    type: 'playingMedia',
+                    playingMedia: {
+                        videoSource: item.elem.currentSrc || item.elem.src || item.elem.getAttribute('src') || '',
+                        url: location.hostname,
+                        state: 'playing'
+                    }
+                }).catch(() => {});
+            }
+        }
+    }, heartbeatIntervalTime);
+}
+
+function stopHeartbeat(): void {
+    if (heartbeatInterval !== null) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
     }
 }
 
@@ -102,12 +142,17 @@ const observer = new MutationObserver(createEvents);
 
 SettingsStorage.onChangeOrLoad((settings: SettingsData) => {
     if (settings.videoCheck) {
+        observer.disconnect();
         observer.observe(document.body, {
             subtree: true,
             childList: true
         });
+        // Hook videos that already exist on the page
+        createEvents();
+        startHeartbeat();
     } else {
         observer.disconnect();
+        stopHeartbeat();
         removeEvents();
 
         const changeEvent: PlayingMediaChangeEvent = {
