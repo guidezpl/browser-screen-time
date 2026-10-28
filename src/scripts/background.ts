@@ -14,15 +14,21 @@ const extensionUUID = Utils.getExtensionUUID();
 let settings: SettingsData;
 let currentTime: Date;
 
-async function iterateCounter(counter: Counter, tab: browser.Tabs.Tab | undefined): Promise<Counter> {
+// If it's a new day, save the current counter for the outgoing day and load the new day's counter.
+// This runs on every tick (even when idle) so a stale counter is never saved under the new day's key.
+async function rollOverIfNewDay(counter: Counter): Promise<Counter> {
     const today = new Date();
-    // If it's a new day, save the current counter for the outgoing day and load the new day's counter
-    if (Utils.formatDate(today) !== Utils.formatDate(currentTime)) {
-        await CounterStorage.set(counter, currentTime);
-        currentTime = today;
-        return await CounterStorage.get();
+    if (Utils.formatDate(today) === Utils.formatDate(currentTime)) {
+        return counter;
     }
 
+    await CounterStorage.set(counter, currentTime);
+    const newCounter = await CounterStorage.get();
+    currentTime = today;
+    return newCounter;
+}
+
+function iterateCounter(counter: Counter, tab: browser.Tabs.Tab | undefined): Counter {
     if (!tab || !tab.url) {
         return counter;
     }
@@ -81,10 +87,25 @@ async function main(): Promise<void> {
 
     // Main loop
     const awake = new Awake;
+    let tickRunning = false;
     setInterval(async () => {
+        // Skip overlapping ticks so counter updates and the day rollover can't interleave
+        if (tickRunning) {
+            return;
+        }
+        tickRunning = true;
+        try {
+            await tick();
+        } finally {
+            tickRunning = false;
+        }
+    }, 1000)
+
+    async function tick(): Promise<void> {
+        counter = await rollOverIfNewDay(counter);
         const tab = (await browser.tabs.query({ lastFocusedWindow: true, active: true }))[0];
         if (awake.available(tab)) {
-            counter = await iterateCounter(counter, tab);
+            counter = iterateCounter(counter, tab);
             browser.action.setIcon({
                 path: {
                     16: "assets/icons/16px.png",
@@ -108,13 +129,12 @@ async function main(): Promise<void> {
                     1024: "assets/icons/disabled/1024px.png"
                 }
             });
-            // console.log(`Considered idle! idle - ${awake.idle}, media - ${awake.mediaPlaying}, focus - ${awake.windowUnfocused}`);
         }
-    }, 1000)
+    }
 
     // Save loop - persist counter every interval regardless of active/idle state
     setInterval(async () => {
-        await CounterStorage.set(counter);
+        await CounterStorage.set(counter, currentTime);
     }, saveIntervalTime)
 }
 
