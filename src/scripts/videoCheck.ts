@@ -7,7 +7,7 @@ interface VideoElementWithEvents {
     play: EventListenerOrEventListenerObject,
     pause: EventListenerOrEventListenerObject,
     emptied: EventListenerOrEventListenerObject,
-    unload: EventListenerOrEventListenerObject,
+    pagehide: EventListenerOrEventListenerObject,
     volumechange: EventListenerOrEventListenerObject
 }
 
@@ -56,7 +56,7 @@ function createEvents(): void {
             sendMediaState('paused');
         };
 
-        const onUnload = () => {
+        const onPageHide = () => {
             sendMediaState('paused');
         };
 
@@ -73,7 +73,7 @@ function createEvents(): void {
             play: onPlay,
             pause: onPause,
             emptied: onEmptied,
-            unload: onUnload,
+            pagehide: onPageHide,
             volumechange: onVolumeChange
         };
 
@@ -81,7 +81,8 @@ function createEvents(): void {
         elem.addEventListener('pause', videoElementWithListeners.pause);
         elem.addEventListener('emptied', videoElementWithListeners.emptied);
         elem.addEventListener('volumechange', videoElementWithListeners.volumechange);
-        window.addEventListener('unload', videoElementWithListeners.unload);
+        // 'unload' is blocked by Permissions Policy on many sites, 'pagehide' is not
+        window.addEventListener('pagehide', videoElementWithListeners.pagehide);
 
         videoElements.push(videoElementWithListeners);
 
@@ -133,7 +134,7 @@ function removeEvents(): void {
         item.elem.removeEventListener('pause', item.pause);
         item.elem.removeEventListener('emptied', item.emptied);
         item.elem.removeEventListener('volumechange', item.volumechange);
-        window.removeEventListener('unload', item.unload);
+        window.removeEventListener('pagehide', item.pagehide);
     }
     videoElements = [];
 }
